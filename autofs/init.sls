@@ -31,7 +31,6 @@ autofs__file_/etc/auto.master:
     - group: root
     - mode: 0644
     - contents: "+dir:/etc/auto.master.d"
-    - contents_newline: True
     - require:
       - pkg: autofs__pkg_autofs
       - file: autofs__file_/etc/auto.master.d
@@ -48,7 +47,7 @@ autofs__file_/etc/auto.master.d/{{autofsmap}}.autofs:
     - user: root
     - group: root
     - mode: 0644
-    - contents: "{{autofsmap_data.mount}} /etc/auto.{{autofsmap}}  {{autofsmap_data.opts|default('')}}"
+    - contents: "{{autofsmap_data.mount}} /etc/auto.{{autofsmap}} --timeout=0"
     - contents_newline: True
     - require:
       - pkg: autofs__pkg_autofs
@@ -57,30 +56,35 @@ autofs__file_/etc/auto.master.d/{{autofsmap}}.autofs:
     - watch_in:
       - service: autofs__service_autofs
 
+{% if autofsmap_data.credentials is defined %}
+{% set opt_str = autofsmap_data.opts ~ ',credentials=/root/.autofs-' ~ autofsmap %}
+autofs__credentials_/root/.autofs-{{ autofsmap }}:
+  file.managed:
+    - name: /root/.autofs-{{ autofsmap }}
+    - user: root
+    - group: root
+    - mode: 0600
+    - contents: |
+        {% for key, value in autofsmap_data.credentials.items() -%}
+        {{ key }}={{ value }}
+        {% endfor %}
+{% else %}
+{% set opt_str = autofsmap_data.opts %}
+{% endif %}
 autofs__file_/etc/auto.{{autofsmap}}:
   file.managed:
     - name: /etc/auto.{{autofsmap}}
-    - replace: False
-    - user: root
-    - group: root
-    - mode: 0644
-
-{% for entity, entity_data in autofsmap_data.entities.items() %}
-autofs__file_/etc/auto.{{autofsmap}}_{{entity}}:
-  file.replace:
-    - name: /etc/auto.{{autofsmap}}
-    - pattern: ^\s*{{entity}}\s+.*$
-    - repl: "{{entity}} {{entity_data.opts|default('')}}  {{entity_data.source}}" 
-    - count: 1
-    - append_if_not_found: True
+    - contents: |
+        {% for entity, entity_data in autofsmap_data.entities.items() -%}
+        {%- if entity_data.opts is defined -%}{%- set opt_str = opt_str~','~entity_data.opts -%}{%- endif -%}
+        {{ [entity, opt_str, entity_data.source] | join(' ') }}
+        {% endfor %}
     - require:
       - pkg: autofs__pkg_autofs
-      - file: autofs__file_/etc/auto.{{autofsmap}}
       - file: autofs__file_/etc/auto.master
       - file: autofs__file_/etc/auto.master.d
     - watch_in:
       - service: autofs__service_autofs
-{% endfor %}
 {% endfor %}
 {% endif %}
 
@@ -91,3 +95,5 @@ autofs__service_autofs:
     - enable: true
     - require:
       - pkg: autofs__pkg_autofs
+    - watch: 
+      - file: autofs__file_/etc/auto.*
